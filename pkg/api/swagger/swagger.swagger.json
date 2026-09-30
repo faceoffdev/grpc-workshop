@@ -1,0 +1,422 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Package spaceship.v1 содержит API для работы с космическими кораблями",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "SpaceshipService",
+      "description": "SpaceshipService предоставляет API для работы с космическими кораблями"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/api/v1/spaceship": {
+      "post": {
+        "summary": "Create создает новый космический корабль",
+        "operationId": "SpaceshipService_Create",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1CreateResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateRequest"
+            }
+          }
+        ],
+        "tags": [
+          "SpaceshipService"
+        ]
+      }
+    },
+    "/api/v1/spaceship/{uuid}": {
+      "get": {
+        "summary": "Get возвращает космический корабль по идентификатору",
+        "operationId": "SpaceshipService_Get",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "uuid",
+            "description": "uuid идентификатор корабля",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "SpaceshipService"
+        ]
+      },
+      "delete": {
+        "summary": "Delete выполняет мягкое удаление космического корабля:\nпроставляет deleted_at, сама запись остается в хранилище",
+        "operationId": "SpaceshipService_Delete",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "uuid",
+            "description": "uuid идентификатор корабля для удаления",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "SpaceshipService"
+        ]
+      },
+      "patch": {
+        "summary": "Update обновляет существующий космический корабль",
+        "operationId": "SpaceshipService_Update",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UpdateResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "uuid",
+            "description": "uuid идентификатор корабля для обновления",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SpaceshipServiceUpdateBody"
+            }
+          }
+        ],
+        "tags": [
+          "SpaceshipService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "SpaceshipServiceUpdateBody": {
+      "type": "object",
+      "properties": {
+        "update_info": {
+          "$ref": "#/definitions/v1SpaceshipUpdateInfo",
+          "title": "Обновляемая информация о корабле (частичное обновление)"
+        }
+      },
+      "title": "UpdateRequest запрос на обновление корабля"
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AntimatterReactor": {
+      "type": "object",
+      "properties": {
+        "antimatter_containment": {
+          "type": "string",
+          "title": "antimatter_containment система удержания антиматерии"
+        },
+        "power_output_tw": {
+          "type": "number",
+          "format": "double",
+          "title": "power_output_tw выходная мощность в тераваттах"
+        },
+        "magnetic_field_strength": {
+          "type": "number",
+          "format": "double",
+          "title": "magnetic_field_strength напряженность магнитного поля в теслах"
+        }
+      },
+      "title": "AntimatterReactor антиматериальный реактор"
+    },
+    "v1CreateRequest": {
+      "type": "object",
+      "properties": {
+        "info": {
+          "$ref": "#/definitions/v1SpaceshipInfo",
+          "title": "Данные для создания корабля"
+        }
+      },
+      "title": "CreateRequest запрос на создание космического корабля"
+    },
+    "v1CreateResponse": {
+      "type": "object",
+      "properties": {
+        "spaceship": {
+          "$ref": "#/definitions/v1Spaceship",
+          "title": "spaceship данные корабля"
+        }
+      },
+      "title": "CreateResponse ответ на запрос создания корабля"
+    },
+    "v1GetResponse": {
+      "type": "object",
+      "properties": {
+        "spaceship": {
+          "$ref": "#/definitions/v1Spaceship",
+          "title": "spaceship данные корабля"
+        }
+      },
+      "title": "GetResponse ответ с данными корабля"
+    },
+    "v1IonEngine": {
+      "type": "object",
+      "properties": {
+        "thrust_newtons": {
+          "type": "number",
+          "format": "double",
+          "title": "thrust_newtons тяга двигателя в ньютонах"
+        },
+        "propellant_type": {
+          "type": "string",
+          "title": "propellant_type тип рабочего тела (ксенон, аргон, криптон)"
+        },
+        "fuel_efficiency": {
+          "type": "number",
+          "format": "double",
+          "title": "fuel_efficiency эффективность расхода топлива (удельный импульс в секундах)"
+        }
+      },
+      "title": "IonEngine ионный двигатель с электростатическим ускорением"
+    },
+    "v1NuclearEngine": {
+      "type": "object",
+      "properties": {
+        "reactor_power_mw": {
+          "type": "number",
+          "format": "double",
+          "title": "reactor_power_mw мощность реактора в мегаваттах"
+        },
+        "coolant_type": {
+          "type": "string",
+          "title": "coolant_type тип охладителя (жидкий натрий, гелий и т.д.)"
+        },
+        "shielding_level": {
+          "type": "integer",
+          "format": "int32",
+          "title": "shielding_level уровень радиационной защиты (1-10)"
+        }
+      },
+      "title": "NuclearEngine ядерный двигатель"
+    },
+    "v1Spaceship": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "title": "uuid уникальный идентификатор корабля"
+        },
+        "info": {
+          "$ref": "#/definitions/v1SpaceshipInfo",
+          "title": "Общая информация о корабле"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "title": "created_at время создания записи"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "title": "updated_at время последнего обновления записи"
+        },
+        "deleted_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "deleted_at время мягкого удаления; не заполнено, пока корабль активен.\nЗапись остается в хранилище (tombstone), но Get и Update отвечают на нее NotFound."
+        }
+      },
+      "title": "Spaceship представляет полную информацию о космическом корабле"
+    },
+    "v1SpaceshipInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "name название корабля"
+        },
+        "description": {
+          "type": "string",
+          "title": "description описание корабля"
+        },
+        "model": {
+          "type": "string",
+          "title": "model модель корабля"
+        },
+        "manufacturer": {
+          "type": "string",
+          "title": "manufacturer производитель корабля"
+        },
+        "price": {
+          "type": "number",
+          "format": "double",
+          "title": "price цена корабля"
+        },
+        "ion_engine": {
+          "$ref": "#/definitions/v1IonEngine"
+        },
+        "warp_drive": {
+          "$ref": "#/definitions/v1WarpDrive"
+        },
+        "nuclear_engine": {
+          "$ref": "#/definitions/v1NuclearEngine"
+        },
+        "antimatter_reactor": {
+          "$ref": "#/definitions/v1AntimatterReactor"
+        }
+      },
+      "title": "SpaceshipInfo базовая информация о космическом корабле"
+    },
+    "v1SpaceshipUpdateInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "name название корабля (опционально)"
+        },
+        "description": {
+          "type": "string",
+          "title": "description описание корабля (опционально)"
+        },
+        "model": {
+          "type": "string",
+          "title": "model модель корабля (опционально)"
+        },
+        "manufacturer": {
+          "type": "string",
+          "title": "manufacturer производитель корабля (опционально)"
+        },
+        "price": {
+          "type": "number",
+          "format": "double",
+          "title": "price цена корабля (опционально)"
+        },
+        "ion_engine": {
+          "$ref": "#/definitions/v1IonEngine"
+        },
+        "warp_drive": {
+          "$ref": "#/definitions/v1WarpDrive"
+        },
+        "nuclear_engine": {
+          "$ref": "#/definitions/v1NuclearEngine"
+        },
+        "antimatter_reactor": {
+          "$ref": "#/definitions/v1AntimatterReactor"
+        }
+      },
+      "title": "SpaceshipUpdateInfo информация о корабле для обновления (все поля опциональны)"
+    },
+    "v1UpdateResponse": {
+      "type": "object",
+      "properties": {
+        "spaceship": {
+          "$ref": "#/definitions/v1Spaceship",
+          "title": "spaceship данные обновленного корабля"
+        }
+      },
+      "title": "UpdateResponse ответ с обновленными данными корабля"
+    },
+    "v1WarpDrive": {
+      "type": "object",
+      "properties": {
+        "warp_factor": {
+          "type": "integer",
+          "format": "int32",
+          "title": "warp_factor варп-фактор (скоростная характеристика)"
+        },
+        "field_stability": {
+          "type": "number",
+          "format": "double",
+          "title": "field_stability стабильность варп-поля (0.0 - 1.0)"
+        },
+        "dilithium_crystals": {
+          "type": "boolean",
+          "title": "dilithium_crystals наличие дилитиевых кристаллов"
+        }
+      },
+      "title": "WarpDrive варп-двигатель для сверхсветовых перемещений"
+    }
+  }
+}

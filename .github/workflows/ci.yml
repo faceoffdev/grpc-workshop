@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Новый пуш в ту же ветку отменяет предыдущий прогон — не жжём раннеры на
+# промежуточных коммитах. Для main отмену не включаем: там каждый коммит важен.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  TASK_VERSION: v3.53.1
+
+jobs:
+  ci:
+    name: format, lint, proto, build, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          # Версия берётся из go.mod — один источник правды, отдельный пин не разъедется
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@${{ env.TASK_VERSION }}
+
+      # Инструменты (golangci-lint, buf, easyp, protoc-плагины) ставятся через
+      # go install в ./bin. Кешируем их по хешу Taskfile: пины версий живут там,
+      # значит смена пина сама инвалидирует кеш.
+      - name: Cache tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-workshop-tools-${{ hashFiles('Taskfile.yaml') }}
+
+      # Кеш proto-зависимостей easyp (тянутся из git по easyp.lock)
+      - name: Cache easyp modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.easyp
+          key: ${{ runner.os }}-easyp-${{ hashFiles('proto/easyp.lock') }}
+
+      - name: Run full gate
+        run: task ci
+
+      # Генерируемый код закоммичен — он не должен разъезжаться с .proto.
+      # Гейт ловит правку .proto без регенерации и ручные правки в pkg/proto.
+      - name: Check generated code is up to date
+        run: |
+          task proto:buf-gen
+          if ! git diff --quiet -- pkg/; then
+            echo "ОШИБКА: сгенерированный код разошёлся с .proto — запусти task proto:buf-gen и закоммить:" >&2
+            git diff --name-status -- pkg/ >&2
+            exit 1
+          fi

@@ -1,0 +1,775 @@
+version: '3'
+
+vars:
+  # ── Пины версий инструментов ────────────────────────────────────────────────
+  # Единственное место правки версии: реестр TOOLS ниже ссылается сюда, а
+  # `task tools:upgrade` переписывает именно эти строки.
+  GOLANGCI_LINT_VERSION: 'v2.14.0'
+  PROTOC_GEN_GO_VERSION: 'v1.36.12'
+  PROTOC_GEN_GO_GRPC_VERSION: 'v1.6.2'
+  PROTOC_GEN_VALIDATE_VERSION: 'v1.3.3'
+  PROTOC_GEN_GRPC_GATEWAY_VERSION: 'v2.31.0'
+  PROTOC_GEN_OPENAPIV2_VERSION: 'v2.31.0'
+  BUF_VERSION: 'v1.73.0'
+  EASYP_VERSION: 'v0.17.0'
+  GRPCURL_VERSION: 'v1.9.4'
+
+  BIN_DIR: '{{.ROOT_DIR}}/bin'
+  # Метки установленных версий: bin/protoc-gen-go существует, но какой он версии —
+  # по файлу не видно. Раньше проверка была `[ -f bin/xxx ] || go install`, и после
+  # бампа пина старый бинарь оставался лежать навсегда. Теперь метка включает версию:
+  # сменился пин — метки нет — инструмент переставится.
+  STAMP_DIR: '{{.BIN_DIR}}/.stamp'
+
+  # ── Реестр инструментов ─────────────────────────────────────────────────────
+  # Один источник для tools:install / tools:outdated / tools:upgrade.
+  #   name       — имя бинаря в ./bin
+  #   group      — что ставим под задачу: lint | proto | test (all ставит всё)
+  #   versionVar — имя пин-переменной выше (её переписывает tools:upgrade через sed)
+  #   version    — текущий пин
+  #   module     — путь модуля для `go list -m <module>@latest` (≠ pkg там, где бинарь
+  #                лежит в подпакете)
+  #   pkg        — что скармливаем `go install`
+  TOOLS:
+    - {name: golangci-lint, group: lint, versionVar: GOLANGCI_LINT_VERSION, version: '{{.GOLANGCI_LINT_VERSION}}', module: github.com/golangci/golangci-lint/v2, pkg: github.com/golangci/golangci-lint/v2/cmd/golangci-lint}
+    - {name: buf, group: proto, versionVar: BUF_VERSION, version: '{{.BUF_VERSION}}', module: github.com/bufbuild/buf, pkg: github.com/bufbuild/buf/cmd/buf}
+    - {name: easyp, group: proto, versionVar: EASYP_VERSION, version: '{{.EASYP_VERSION}}', module: github.com/easyp-tech/easyp, pkg: github.com/easyp-tech/easyp/cmd/easyp}
+    - {name: protoc-gen-go, group: proto, versionVar: PROTOC_GEN_GO_VERSION, version: '{{.PROTOC_GEN_GO_VERSION}}', module: google.golang.org/protobuf, pkg: google.golang.org/protobuf/cmd/protoc-gen-go}
+    - {name: protoc-gen-go-grpc, group: proto, versionVar: PROTOC_GEN_GO_GRPC_VERSION, version: '{{.PROTOC_GEN_GO_GRPC_VERSION}}', module: google.golang.org/grpc/cmd/protoc-gen-go-grpc, pkg: google.golang.org/grpc/cmd/protoc-gen-go-grpc}
+    - {name: protoc-gen-validate, group: proto, versionVar: PROTOC_GEN_VALIDATE_VERSION, version: '{{.PROTOC_GEN_VALIDATE_VERSION}}', module: github.com/envoyproxy/protoc-gen-validate, pkg: github.com/envoyproxy/protoc-gen-validate}
+    # Go-only вариант того же плагина — его зовёт easyp: мультиязычный protoc-gen-validate
+    # не видит lang=go, когда опции приезжают через CodeGeneratorRequest.Parameter.
+    # sharedPin: делит пин с protoc-gen-validate выше — в outdated/upgrade не участвует,
+    # иначе одна и та же версия проверялась бы дважды.
+    - {name: protoc-gen-validate-go, group: proto, sharedPin: 'yes', versionVar: PROTOC_GEN_VALIDATE_VERSION, version: '{{.PROTOC_GEN_VALIDATE_VERSION}}', module: github.com/envoyproxy/protoc-gen-validate, pkg: github.com/envoyproxy/protoc-gen-validate/cmd/protoc-gen-validate-go}
+    - {name: protoc-gen-grpc-gateway, group: proto, versionVar: PROTOC_GEN_GRPC_GATEWAY_VERSION, version: '{{.PROTOC_GEN_GRPC_GATEWAY_VERSION}}', module: github.com/grpc-ecosystem/grpc-gateway/v2, pkg: github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway}
+    - {name: protoc-gen-openapiv2, group: proto, versionVar: PROTOC_GEN_OPENAPIV2_VERSION, version: '{{.PROTOC_GEN_OPENAPIV2_VERSION}}', module: github.com/grpc-ecosystem/grpc-gateway/v2, pkg: github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2}
+    - {name: grpcurl, group: test, versionVar: GRPCURL_VERSION, version: '{{.GRPCURL_VERSION}}', module: github.com/fullstorydev/grpcurl, pkg: github.com/fullstorydev/grpcurl/cmd/grpcurl}
+
+  # Пути к бинарям — их дёргают остальные таски; реестром-списком это не заменить.
+  GOLANGCI_LINT: '{{.BIN_DIR}}/golangci-lint'
+  BUF: '{{.BIN_DIR}}/buf'
+  EASYP: '{{.BIN_DIR}}/easyp'
+  GRPCURL: '{{.BIN_DIR}}/grpcurl'
+
+  # ── Адреса ──────────────────────────────────────────────────────────────────
+  # Раньше 127.0.0.1:50051 и http://127.0.0.1:8081 были вбиты руками в двух десятках
+  # мест внутри тестовых тасков — сменить порт означало искать их все.
+  GRPC_HOST: '127.0.0.1'
+  GRPC_PORT: '50051'
+  HTTP_PORT: '8081'
+  GRPC_ADDR: '{{.GRPC_HOST}}:{{.GRPC_PORT}}'
+  HTTP_ADDR: 'http://{{.GRPC_HOST}}:{{.HTTP_PORT}}'
+  # Порты инстансов для демо клиентской балансировки (task run:cluster)
+  CLUSTER_PORTS: '50051 50052 50053 50054'
+
+tasks:
+  # ══ Инструменты ═════════════════════════════════════════════════════════════
+
+  tools:install:
+    desc: "Ставит все пиннутые инструменты в ./bin"
+    silent: true
+    cmds:
+      - task: _tools:install
+        vars: { GROUP: all }
+
+  tools:install:lint:
+    desc: "Ставит только golangci-lint"
+    silent: true
+    cmds:
+      - task: _tools:install
+        vars: { GROUP: lint }
+
+  tools:install:proto:
+    desc: "Ставит buf, easyp и protoc-плагины"
+    silent: true
+    cmds:
+      - task: _tools:install
+        vars: { GROUP: proto }
+
+  tools:install:test:
+    desc: "Ставит grpcurl"
+    silent: true
+    cmds:
+      - task: _tools:install
+        vars: { GROUP: test }
+
+  _tools:install:
+    internal: true
+    silent: true
+    # Одна реализация установки на все инструменты вместо десяти копий
+    # `[ -f bin/xxx ] || { echo ...; go install ... }`.
+    # Фильтр по группе делается в шелле: `for` в go-task не умеет отбирать элементы.
+    # Метка ставится ПОСЛЕ успешного go install — сорванная установка не притворится удачной.
+    requires:
+      vars: [GROUP]
+    cmds:
+      - for: { var: TOOLS }
+        cmd: |
+          case "{{.GROUP}}" in
+            all|{{.ITEM.group}}) ;;
+            *) exit 0 ;;
+          esac
+          stamp="{{.STAMP_DIR}}/{{.ITEM.name}}@{{.ITEM.version}}"
+          if [ -f "$stamp" ] && [ -x "{{.BIN_DIR}}/{{.ITEM.name}}" ]; then
+            exit 0
+          fi
+          echo "📦 {{.ITEM.name}} {{.ITEM.version}}..."
+          GOBIN="{{.BIN_DIR}}" go install "{{.ITEM.pkg}}@{{.ITEM.version}}"
+          mkdir -p "{{.STAMP_DIR}}"
+          rm -f "{{.STAMP_DIR}}/{{.ITEM.name}}@"*
+          touch "$stamp"
+
+  tools:outdated:
+    desc: "Показать пиннутые версии инструментов против latest (в пределах мажора)"
+    silent: true
+    cmds:
+      - task: _tools:versions
+        vars: { MODE: check }
+
+  tools:upgrade:
+    desc: "Бампнуть пины инструментов до latest прямо в Taskfile; дальше: task tools:install && task ci"
+    silent: true
+    cmds:
+      - task: _tools:versions
+        vars: { MODE: upgrade }
+      - cmd: 'echo "Пины обновлены в Taskfile.yaml. Дальше: task tools:install && task ci"'
+
+  _tools:versions:
+    internal: true
+    silent: true
+    # Общая логика outdated/upgrade по реестру TOOLS.
+    # MODE=check — только показ; MODE=upgrade — переписываем пин *_VERSION в Taskfile
+    # (sed -i '' — синтаксис BSD/macOS). Апгрейд тянет latest вслепую и может принести
+    # ломающий бамп, поэтому переустановку и проверку не зовём сами — после upgrade
+    # гони `task tools:install && task ci` и смотри по диффу.
+    # Записи с sharedPin пропускаем — их версия уже проверена «основным» инструментом.
+    requires:
+      vars: [MODE]
+    cmds:
+      - cmd: 'echo "Инструменты:"'
+      - for: { var: TOOLS }
+        cmd: |
+          [ -n "{{.ITEM.sharedPin}}" ] && exit 0
+          latest=$(go list -m -f '{{`{{.Version}}`}}' "{{.ITEM.module}}@latest" 2>/dev/null) \
+            || { printf '  %-24s ошибка запроса\n' "{{.ITEM.name}}"; exit 0; }
+          if [ "$latest" = "{{.ITEM.version}}" ]; then
+            printf '  %-24s %s (актуально)\n' "{{.ITEM.name}}" "{{.ITEM.version}}"
+          elif [ "{{.MODE}}" = "upgrade" ]; then
+            sed -i '' "s|^  {{.ITEM.versionVar}}: .*|  {{.ITEM.versionVar}}: '$latest'|" Taskfile.yaml
+            printf '  %-24s %s → %s\n' "{{.ITEM.name}}" "{{.ITEM.version}}" "$latest"
+          else
+            printf '  %-24s %s → доступна %s\n' "{{.ITEM.name}}" "{{.ITEM.version}}" "$latest"
+          fi
+
+  tools:clean:
+    desc: "Снести все установленные инструменты (rm -rf ./bin) — полный ресет"
+    cmds:
+      - rm -rf {{.BIN_DIR}}
+
+  # ══ Go: формат, линт, сборка ════════════════════════════════════════════════
+
+  format:
+    desc: "Форматирует весь проект (gofumpt + gci из секции formatters в .golangci.yml)"
+    aliases: [fmt]
+    deps: [tools:install:lint]
+    silent: true
+    cmds:
+      - |
+        echo "🧼 Форматируем через golangci-lint fmt ..."
+        {{.GOLANGCI_LINT}} fmt ./... --config=.golangci.yml
+
+  format:check:
+    desc: "Проверяет форматирование без записи (--diff) — гейт для CI"
+    deps: [tools:install:lint]
+    silent: true
+    # --diff печатает дифф и возвращает ненулевой код, если что-то не отформатировано.
+    # Рабочее дерево не трогает (в отличие от `task format`).
+    cmds:
+      - |
+        echo "🔍 Проверяем форматирование..."
+        {{.GOLANGCI_LINT}} fmt ./... --config=.golangci.yml --diff
+
+  lint:
+    desc: "Запускает golangci-lint"
+    deps: [tools:install:lint]
+    silent: true
+    cmds:
+      - |
+        echo "🔍 Запускаем golangci-lint..."
+        {{.GOLANGCI_LINT}} run ./... --config=.golangci.yml
+
+  build:
+    desc: "Собирает все бинари проекта"
+    silent: true
+    cmds:
+      - |
+        echo "🔨 Собираем..."
+        go build ./...
+
+  test:
+    desc: "Go-тесты (race, без кеша)"
+    silent: true
+    cmds:
+      - go test -race -count=1 ./...
+
+  mod:tidy:
+    desc: "Привести go.mod/go.sum к go mod tidy"
+    cmds:
+      - go mod tidy
+
+  mod:tidy:check:
+    desc: "Свежесть go.mod/go.sum (go mod tidy -diff) — гейт для CI"
+    cmds:
+      - go mod tidy -diff
+
+  # ══ Proto ═══════════════════════════════════════════════════════════════════
+
+  proto:buf-lint:
+    desc: "Проверка .proto на соответствие стилю (buf)"
+    aliases: [proto:lint]
+    deps: [tools:install:proto]
+    dir: proto
+    cmds:
+      - '{{.BUF}} lint'
+
+  proto:buf-update:
+    desc: "Обновляет protobuf-зависимости buf (googleapis и т.д.). Требует buf registry login"
+    deps: [tools:install:proto]
+    dir: proto
+    cmds:
+      - |
+        echo "🔄 Обновляем зависимости buf..."
+        {{.BUF}} dep update
+
+  proto:buf-gen:
+    desc: "Генерирует Go код из proto через buf"
+    deps: [tools:install:proto, proto:buf-lint]
+    silent: true
+    dir: proto
+    cmds:
+      - |
+        echo "🔧 Генерируем Go код через buf..."
+        {{.BUF}} generate
+
+  proto:easyp-lint:
+    desc: "Проверка .proto на соответствие стилю (easyp)"
+    deps: [tools:install:proto]
+    dir: proto
+    cmds:
+      - '{{.EASYP}} --config easyp.yaml lint'
+
+  proto:easyp-deps:
+    desc: "Скачивает protobuf-зависимости, объявленные в easyp.yaml (пишет easyp.lock)"
+    deps: [tools:install:proto]
+    dir: proto
+    cmds:
+      - |
+        echo "🔄 Обновляем зависимости easyp..."
+        {{.EASYP}} --config easyp.yaml mod download
+
+  proto:easyp-gen:
+    desc: "Генерирует Go код из proto через easyp"
+    deps: [tools:install:proto, proto:easyp-lint]
+    silent: true
+    dir: proto
+    cmds:
+      - |
+        echo "🔧 Генерируем Go код через easyp..."
+        mkdir -p ../pkg/proto ../pkg/api/swagger
+        # easyp ищет protoc-gen-* плагины в PATH, поэтому добавляем туда ./bin
+        PATH={{.BIN_DIR}}:$PATH {{.EASYP}} --config easyp.yaml generate
+
+  proto:protoc-gen:
+    desc: "Генерирует Go код из proto через protoc (голый вариант, для сравнения)"
+    deps: [tools:install:proto]
+    silent: true
+    # preconditions вместо `|| { echo; exit 1 }` внутри команды: отсутствие protoc —
+    # это про окружение, а не про результат генерации, и сообщение об этом должно
+    # быть отдельным и понятным.
+    preconditions:
+      - sh: command -v protoc
+        msg: "protoc не найден — поставь его: https://protobuf.dev/installation/ (buf/easyp его не требуют)"
+    cmds:
+      - |
+        echo "🔧 Генерируем Go код через protoc..."
+        mkdir -p pkg
+        PATH={{.BIN_DIR}}:$PATH protoc \
+          --go_out=pkg/ --go_opt=paths=source_relative \
+          --go-grpc_out=pkg/ --go-grpc_opt=paths=source_relative \
+          proto/spaceship/v1/spaceship.proto
+
+  # ══ Запуск ══════════════════════════════════════════════════════════════════
+
+  run:server:
+    desc: "Поднять gRPC сервер + gRPC-Gateway + Swagger UI (порты можно переопределить: task run:server GRPC_PORT=50055)"
+    cmds:
+      - go run ./cmd/grpc_server -grpc-port={{.GRPC_PORT}} -http-port={{.HTTP_PORT}}
+
+  run:cluster:
+    desc: "Поднять несколько инстансов сервера для демо балансировки. Ctrl-C гасит все"
+    # Демо клиентской балансировки (run:client:lb) ждёт четыре инстанса на 50051-50054.
+    # Раньше их надо было поднимать четырьмя терминалами вручную.
+    # Нужен настоящий bash: встроенный шелл go-task (mvdan/sh) не умеет trap/kill 0.
+    # trap "kill 0" шлёт сигнал всей группе процессов — Ctrl-C гасит разом все инстансы.
+    cmds:
+      - >-
+        bash -c 'trap "kill 0" EXIT INT TERM;
+        for port in {{.CLUSTER_PORTS}}; do
+          go run ./cmd/grpc_server -grpc-port=$port -http-port=$((port - 42000)) -server-id=srv-$port &
+        done;
+        wait'
+
+  run:client:
+    desc: "Базовый CRUD-клиент"
+    cmds:
+      - go run ./cmd/grpc_client
+
+  run:client:streaming:
+    desc: "Клиент server-streaming (WatchUpdates)"
+    cmds:
+      - go run ./cmd/grpc_streaming_client
+
+  run:client:headers:
+    desc: "Клиент с metadata/headers/trailers"
+    cmds:
+      - go run ./cmd/grpc_headers_client
+
+  run:client:lb:
+    desc: "Клиент с клиентской балансировкой (нужен запущенный task run:cluster)"
+    cmds:
+      - go run ./cmd/grpc_manual_resolver_client
+
+  # ══ Агрегаты ════════════════════════════════════════════════════════════════
+
+  ci:
+    desc: "Полный гейт: формат, линт, proto-линт, сборка, тесты"
+    cmds:
+      - task: format:check
+      - task: lint
+      - task: mod:tidy:check
+      - task: proto:buf-lint
+      - task: proto:easyp-lint
+      - task: build
+      - task: test
+
+  test:api:
+    desc: "Все проверки API: gRPC + HTTP (нужен запущенный сервер)"
+    cmds:
+      - task: test:grpc:all
+      - task: test:http:all
+
+  # gRPC тесты
+  test:grpc:create:
+    desc: "Тестирует CREATE endpoint через grpcurl"
+    deps: [ tools:install:test ]
+    silent: true
+    cmds:
+      - |
+        echo "🧪 Тестируем CREATE endpoint..."
+        echo "  ✅ Успешное создание корабля:"
+        {{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Test Ship",
+            "description": "Test Description",
+            "model": "TEST-001",
+            "manufacturer": "Test Corp",
+            "price": 100000.50
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create
+        
+        echo "  🔍 Проверка создания корабля с слишком коротким именем:"
+        {{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Te",
+            "description": "Test Description",
+            "model": "TEST-001",
+            "manufacturer": "Test Corp",
+            "price": 100000.50
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create  || echo "    ✅ Получили ожидаемую ошибку"
+
+        echo "  🔍 Проверка создания корабля с слишком длинным именем:"
+        {{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "TeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTeTe",
+            "description": "Test Description",
+            "model": "TEST-001",
+            "manufacturer": "Test Corp",
+            "price": 100000.50
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create  || echo "    ✅ Получили ожидаемую ошибку"
+
+        echo ""
+        echo "  ⚡ Создание корабля с ионным двигателем:"
+        {{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Ion Explorer",
+            "description": "Корабль с ионным двигателем",
+            "model": "ION-001",
+            "manufacturer": "Ion Corp",
+            "price": 75000000.00,
+            "ionEngine": {
+              "thrustNewtons": 15000.0,
+              "propellantType": "Ксенон",
+              "fuelEfficiency": 3100.0
+            }
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create
+        echo "    ✅ Корабль с ионным двигателем создан"
+
+        echo ""
+        echo "  🚀 Создание корабля с варп-двигателем:"
+        {{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Enterprise",
+            "description": "Корабль с варп-двигателем",
+            "model": "WARP-001",
+            "manufacturer": "Starfleet",
+            "price": 200000000.00,
+            "warpDrive": {
+              "warpFactor": 9,
+              "fieldStability": 0.98,
+              "dilithiumCrystals": true
+            }
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create
+        echo "    ✅ Корабль с варп-двигателем создан"
+
+        echo ""
+        echo "  ☢️  Создание корабля с ядерным двигателем:"
+        {{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Nuclear Titan",
+            "description": "Корабль с ядерным двигателем",
+            "model": "NUC-001",
+            "manufacturer": "Nuclear Systems",
+            "price": 120000000.00,
+            "nuclearEngine": {
+              "reactorPowerMw": 500.0,
+              "coolantType": "Жидкий натрий",
+              "shieldingLevel": 9
+            }
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create
+        echo "    ✅ Корабль с ядерным двигателем создан"
+
+        echo ""
+        echo "  💥 Создание корабля с антиматериальным реактором:"
+        {{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Antimatter Voyager",
+            "description": "Корабль с антиматериальным реактором",
+            "model": "AM-001",
+            "manufacturer": "Advanced Propulsion Inc",
+            "price": 500000000.00,
+            "antimatterReactor": {
+              "antimatterContainment": "Магнитная ловушка Пеннинга",
+              "powerOutputTw": 2.5,
+              "magneticFieldStrength": 15000.0
+            }
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create
+        echo "    ✅ Корабль с антиматериальным реактором создан"
+
+  test:grpc:get:
+    desc: "Тестирует GET endpoint через grpcurl"
+    deps: [ tools:install:test ]
+    silent: true
+    cmds:
+      - |
+        echo "🧪 Тестируем GET endpoint..."
+        echo "  ✅ Создаем корабль для тестирования:"
+        UUID=$({{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Get Test Ship",
+            "description": "For GET testing",
+            "model": "GET-001",
+            "manufacturer": "Get Corp",
+            "price": 50000.25
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create | jq -r '.spaceship.uuid')
+        echo "    UUID: $UUID"
+
+        echo "  ✅ Успешное получение корабля:"
+        {{.GRPCURL}} -plaintext -d "{\"uuid\": \"$UUID\"}" {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Get
+
+        echo "  🔍 Проверяем несуществующий UUID:"
+        {{.GRPCURL}} -plaintext -d '{"uuid": "00000000-0000-0000-0000-000000000000"}' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Get || echo "    ✅ Получили ожидаемую ошибку"
+
+  test:grpc:update:
+    desc: "Тестирует UPDATE endpoint через grpcurl"
+    deps: [ tools:install:test ]
+    silent: true
+    cmds:
+      - |
+        echo "🧪 Тестируем UPDATE endpoint..."
+        echo "  ✅ Создаем корабль для тестирования:"
+        UUID=$({{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Update Test Ship",
+            "description": "For UPDATE testing",
+            "model": "UPD-001",
+            "manufacturer": "Update Corp",
+            "price": 75000.00
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create | jq -r '.spaceship.uuid')
+        echo "    UUID: $UUID"
+
+        echo "  ✅ Успешное обновление корабля:"
+        {{.GRPCURL}} -plaintext -d "{
+          \"uuid\": \"$UUID\",
+          \"update_info\": {
+            \"name\": \"Updated Ship Name\",
+            \"price\": 85000.00
+          }
+        }" {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Update
+
+        echo "  🔍 Проверяем обновление несуществующего корабля:"
+        {{.GRPCURL}} -plaintext -d '{
+          "uuid": "00000000-0000-0000-0000-000000000000",
+          "update_info": {"name": "Test"}
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Update || echo "    ✅ Получили ожидаемую ошибку"
+
+  test:grpc:delete:
+    desc: "Тестирует DELETE endpoint через grpcurl"
+    deps: [ tools:install:test ]
+    silent: true
+    cmds:
+      - |
+        echo "🧪 Тестируем DELETE endpoint..."
+        echo "  ✅ Создаем корабль для тестирования:"
+        UUID=$({{.GRPCURL}} -plaintext -d '{
+          "info": {
+            "name": "Delete Test Ship",
+            "description": "For DELETE testing",
+            "model": "DEL-001",
+            "manufacturer": "Delete Corp",
+            "price": 25000.00
+          }
+        }' {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Create | jq -r '.spaceship.uuid')
+        echo "    UUID: $UUID"
+
+        echo "  ✅ Успешное удаление корабля:"
+        {{.GRPCURL}} -plaintext -d "{\"uuid\": \"$UUID\"}" {{.GRPC_ADDR}} spaceship.v1.SpaceshipService/Delete
+
+  test:grpc:all:
+    desc: "Запускает все тесты gRPC API"
+    silent: true
+    cmds:
+      - echo "🚀 Запускаем все тесты gRPC API..."
+      - task: test:grpc:create
+      - task: test:grpc:get
+      - task: test:grpc:update
+      - task: test:grpc:delete
+      - echo "✅ Все тесты gRPC API завершены"
+
+  # HTTP/REST тесты через gRPC Gateway
+  test:http:create:
+    desc: "Тестирует CREATE endpoint через HTTP/curl"
+    silent: true
+    cmds:
+      - |
+        echo "🌐 Тестируем HTTP CREATE endpoint..."
+        echo "  ✅ Успешное создание корабля:"
+        if curl -s -f -X POST {{.HTTP_ADDR}}/api/v1/spaceship \
+          -H "Content-Type: application/json" \
+          -d '{
+            "info": {
+              "name": "Test Ship HTTP",
+              "description": "Test Description via HTTP",
+              "model": "HTTP-001",
+              "manufacturer": "HTTP Corp",
+              "price": 100000.50
+            }
+          }' | jq '.'; then
+          echo "    ✅ Корабль успешно создан"
+        else
+          echo "    ❌ Ошибка создания корабля (проверьте, что gRPC Gateway запущен на порту 8081)"
+        fi
+        
+        echo "  🔍 Проверка валидации - слишком короткое имя:"
+        RESPONSE=$(curl -s -X POST {{.HTTP_ADDR}}/api/v1/spaceship \
+          -H "Content-Type: application/json" \
+          -d '{
+            "info": {
+              "name": "Te",
+              "description": "Test Description",
+              "model": "TEST-001",
+              "manufacturer": "Test Corp",
+              "price": 100000.50
+            }
+          }' 2>/dev/null)
+        if echo "$RESPONSE" | jq -e '.code' >/dev/null 2>&1; then
+          echo "    ✅ Получили ожидаемую ошибку валидации:"
+          echo "$RESPONSE" | jq '.'
+        else
+          echo "    ❌ Неожиданно создан корабль с коротким именем"
+          echo "$RESPONSE" | jq '.'
+        fi
+
+        echo "  🔍 Проверка валидации - слишком длинное имя:"
+        RESPONSE=$(curl -s -X POST {{.HTTP_ADDR}}/api/v1/spaceship \
+          -H "Content-Type: application/json" \
+          -d '{
+            "info": {
+              "name": "VeryLongSpaceshipNameThatExceedsFiftyCharactersLimit",
+              "description": "Test Description",
+              "model": "TEST-001",
+              "manufacturer": "Test Corp",
+              "price": 100000.50
+            }
+          }' 2>/dev/null)
+        if echo "$RESPONSE" | jq -e '.code' >/dev/null 2>&1; then
+          echo "    ✅ Получили ожидаемую ошибку валидации:"
+          echo "$RESPONSE" | jq '.'
+        else
+          echo "    ❌ Неожиданно создан корабль с длинным именем"
+          echo "$RESPONSE" | jq '.'
+        fi
+
+  test:http:get:
+    desc: "Тестирует GET endpoint через HTTP/curl"
+    silent: true
+    cmds:
+      - |
+        echo "🌐 Тестируем HTTP GET endpoint..."
+        echo "  ✅ Создаем корабль для тестирования:"
+        UUID=$(curl -s -f -X POST {{.HTTP_ADDR}}/api/v1/spaceship \
+          -H "Content-Type: application/json" \
+          -d '{
+            "info": {
+              "name": "Get Test Ship HTTP",
+              "description": "For HTTP GET testing",
+              "model": "HTTP-GET-001",
+              "manufacturer": "HTTP Get Corp",
+              "price": 50000.25
+            }
+          }' 2>/dev/null | jq -r '.spaceship.uuid' 2>/dev/null)
+        if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
+          echo "    UUID: $UUID"
+        else
+          echo "    ❌ Не удалось создать корабль для тестирования"
+          exit 1
+        fi
+
+        echo "  ✅ Успешное получение корабля:"
+        if curl -s -f -X GET "{{.HTTP_ADDR}}/api/v1/spaceship/$UUID" \
+          -H "Content-Type: application/json" | jq '.'; then
+          echo "    ✅ Корабль успешно получен"
+        else
+          echo "    ❌ Ошибка получения корабля"
+        fi
+
+        echo "  🔍 Проверяем несуществующий UUID:"
+        RESPONSE=$(curl -s -X GET "{{.HTTP_ADDR}}/api/v1/spaceship/00000000-0000-0000-0000-000000000000" \
+          -H "Content-Type: application/json" 2>/dev/null)
+        if echo "$RESPONSE" | jq -e '.code' >/dev/null 2>&1; then
+          echo "    ✅ Получили ожидаемую ошибку:"
+          echo "$RESPONSE" | jq '.'
+        else
+          echo "    ❌ Неожиданно найден несуществующий корабль"
+          echo "$RESPONSE" | jq '.'
+        fi
+
+  test:http:update:
+    desc: "Тестирует UPDATE endpoint через HTTP/curl"
+    silent: true
+    cmds:
+      - |
+        echo "🌐 Тестируем HTTP UPDATE endpoint..."
+        echo "  ✅ Создаем корабль для тестирования:"
+        UUID=$(curl -s -f -X POST {{.HTTP_ADDR}}/api/v1/spaceship \
+          -H "Content-Type: application/json" \
+          -d '{
+            "info": {
+              "name": "Update Test Ship HTTP",
+              "description": "For HTTP UPDATE testing",
+              "model": "HTTP-UPD-001",
+              "manufacturer": "HTTP Update Corp",
+              "price": 75000.00
+            }
+          }' 2>/dev/null | jq -r '.spaceship.uuid' 2>/dev/null)
+        if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
+          echo "    UUID: $UUID"
+        else
+          echo "    ❌ Не удалось создать корабль для тестирования"
+          exit 1
+        fi
+
+        echo "  ✅ Успешное обновление корабля:"
+        if curl -s -f -X PATCH "{{.HTTP_ADDR}}/api/v1/spaceship/$UUID" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "update_info": {
+              "name": "Updated Ship Name HTTP",
+              "price": 85000.00
+            }
+          }' | jq '.'; then
+          echo "    ✅ Корабль успешно обновлен"
+        else
+          echo "    ❌ Ошибка обновления корабля"
+        fi
+
+        echo "  🔍 Проверяем обновление несуществующего корабля:"
+        RESPONSE=$(curl -s -X PATCH "{{.HTTP_ADDR}}/api/v1/spaceship/00000000-0000-0000-0000-000000000000" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "update_info": {
+              "name": "Test"
+            }
+          }' 2>/dev/null)
+        if echo "$RESPONSE" | jq -e '.code' >/dev/null 2>&1; then
+          echo "    ✅ Получили ожидаемую ошибку:"
+          echo "$RESPONSE" | jq '.'
+        else
+          echo "    ❌ Неожиданно обновлен несуществующий корабль"
+          echo "$RESPONSE" | jq '.'
+        fi
+
+  test:http:delete:
+    desc: "Тестирует DELETE endpoint через HTTP/curl"
+    silent: true
+    cmds:
+      - |
+        echo "🌐 Тестируем HTTP DELETE endpoint..."
+        echo "  ✅ Создаем корабль для тестирования:"
+        UUID=$(curl -s -f -X POST {{.HTTP_ADDR}}/api/v1/spaceship \
+          -H "Content-Type: application/json" \
+          -d '{
+            "info": {
+              "name": "Delete Test Ship HTTP",
+              "description": "For HTTP DELETE testing",
+              "model": "HTTP-DEL-001",
+              "manufacturer": "HTTP Delete Corp",
+              "price": 25000.00
+            }
+          }' 2>/dev/null | jq -r '.spaceship.uuid' 2>/dev/null)
+        if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
+          echo "    UUID: $UUID"
+        else
+          echo "    ❌ Не удалось создать корабль для тестирования"
+          exit 1
+        fi
+
+        echo "  ✅ Успешное удаление корабля:"
+        RESPONSE=$(curl -s -X DELETE "{{.HTTP_ADDR}}/api/v1/spaceship/$UUID" \
+          -H "Content-Type: application/json" 2>/dev/null)
+        if echo "$RESPONSE" | jq -e '.code' >/dev/null 2>&1; then
+          echo "    ❌ Ошибка удаления корабля:"
+          echo "$RESPONSE" | jq '.'
+        else
+          echo "    ✅ Корабль успешно удален"
+          echo "$RESPONSE" | jq '.'
+        fi
+
+  test:http:all:
+    desc: "Запускает все HTTP/REST тесты"
+    silent: true
+    cmds:
+      - echo "🌐 Запускаем все HTTP/REST тесты..."
+      - task: test:http:create
+      - task: test:http:get
+      - task: test:http:update
+      - task: test:http:delete
+      - echo "✅ Все HTTP/REST тесты завершены"

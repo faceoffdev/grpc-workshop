@@ -1,0 +1,250 @@
+syntax = "proto3";
+
+// Package spaceship.v1 содержит API для работы с космическими кораблями
+package spaceship.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/empty.proto";
+import "validate/validate.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/olezhek28/grpc-workshop/pkg/proto/spaceship/v1;spaceship_v1";
+
+// SpaceshipService предоставляет API для работы с космическими кораблями
+service SpaceshipService {
+  // Create создает новый космический корабль
+  rpc Create(CreateRequest) returns (CreateResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/spaceship"
+      body: "*"
+    };
+  }
+
+  // Get возвращает космический корабль по идентификатору
+  rpc Get(GetRequest) returns (GetResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/spaceship/{uuid}"
+    };
+  }
+
+  // Update обновляет существующий космический корабль
+  rpc Update(UpdateRequest) returns (UpdateResponse) {
+    option (google.api.http) = {
+      patch: "/api/v1/spaceship/{uuid}"
+      body: "*"
+    };
+  }
+
+  // Delete выполняет мягкое удаление космического корабля:
+  // проставляет deleted_at, сама запись остается в хранилище
+  rpc Delete(DeleteRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/api/v1/spaceship/{uuid}"
+    };
+  }
+
+  // WatchUpdates возвращает стрим обновлений кораблей (server streaming)
+  rpc WatchUpdates(WatchUpdatesRequest) returns (stream WatchUpdatesResponse);
+}
+
+// IonEngine ионный двигатель с электростатическим ускорением
+message IonEngine {
+  // thrust_newtons тяга двигателя в ньютонах
+  double thrust_newtons = 1;
+
+  // propellant_type тип рабочего тела (ксенон, аргон, криптон)
+  string propellant_type = 2;
+
+  // fuel_efficiency эффективность расхода топлива (удельный импульс в секундах)
+  double fuel_efficiency = 3;
+}
+
+// WarpDrive варп-двигатель для сверхсветовых перемещений
+message WarpDrive {
+  // warp_factor варп-фактор (скоростная характеристика)
+  int32 warp_factor = 1 [(validate.rules).int32 = {gte: 1, lte: 10}];
+
+  // field_stability стабильность варп-поля (0.0 - 1.0)
+  double field_stability = 2 [(validate.rules).double = {gte: 0.0, lte: 1.0}];
+
+  // dilithium_crystals наличие дилитиевых кристаллов
+  bool dilithium_crystals = 3;
+}
+
+// NuclearEngine ядерный двигатель
+message NuclearEngine {
+  // reactor_power_mw мощность реактора в мегаваттах
+  double reactor_power_mw = 1;
+
+  // coolant_type тип охладителя (жидкий натрий, гелий и т.д.)
+  string coolant_type = 2;
+
+  // shielding_level уровень радиационной защиты (1-10)
+  int32 shielding_level = 3 [(validate.rules).int32 = {gte: 1, lte: 10}];
+}
+
+// AntimatterReactor антиматериальный реактор
+message AntimatterReactor {
+  // antimatter_containment система удержания антиматерии
+  string antimatter_containment = 1;
+
+  // power_output_tw выходная мощность в тераваттах
+  double power_output_tw = 2;
+
+  // magnetic_field_strength напряженность магнитного поля в теслах
+  double magnetic_field_strength = 3;
+}
+
+// SpaceshipInfo базовая информация о космическом корабле
+message SpaceshipInfo {
+  // name название корабля
+  string name = 1 [(validate.rules).string = {min_len: 3, max_len: 50}];
+
+  // description описание корабля
+  google.protobuf.StringValue description = 2;
+
+  // model модель корабля
+  string model = 3;
+
+  // manufacturer производитель корабля
+  string manufacturer = 4;
+
+  // price цена корабля
+  double price = 5;
+
+  // engine тип двигателя корабля (взаимоисключающие варианты)
+  oneof engine {
+    IonEngine ion_engine = 6;
+    WarpDrive warp_drive = 7;
+    NuclearEngine nuclear_engine = 8;
+    AntimatterReactor antimatter_reactor = 9;
+  }
+}
+
+// SpaceshipUpdateInfo информация о корабле для обновления (все поля опциональны)
+message SpaceshipUpdateInfo {
+  // name название корабля (опционально)
+  google.protobuf.StringValue name = 1;
+
+  // description описание корабля (опционально)
+  google.protobuf.StringValue description = 2;
+
+  // model модель корабля (опционально)
+  google.protobuf.StringValue model = 3;
+
+  // manufacturer производитель корабля (опционально)
+  google.protobuf.StringValue manufacturer = 4;
+
+  // price цена корабля (опционально)
+  google.protobuf.DoubleValue price = 5;
+
+  // engine тип двигателя корабля для обновления (опционально, взаимоисключающие варианты)
+  oneof engine {
+    IonEngine ion_engine = 6;
+    WarpDrive warp_drive = 7;
+    NuclearEngine nuclear_engine = 8;
+    AntimatterReactor antimatter_reactor = 9;
+  }
+}
+
+// Spaceship представляет полную информацию о космическом корабле
+message Spaceship {
+  // uuid уникальный идентификатор корабля
+  string uuid = 1;
+
+  // Общая информация о корабле
+  SpaceshipInfo info = 2;
+
+  // created_at время создания записи
+  google.protobuf.Timestamp created_at = 3;
+
+  // updated_at время последнего обновления записи
+  google.protobuf.Timestamp updated_at = 4;
+
+  // deleted_at время мягкого удаления; не заполнено, пока корабль активен.
+  // Запись остается в хранилище (tombstone), но Get и Update отвечают на нее NotFound.
+  google.protobuf.Timestamp deleted_at = 5;
+}
+
+// CreateRequest запрос на создание космического корабля
+message CreateRequest {
+  // Данные для создания корабля
+  SpaceshipInfo info = 1 [(validate.rules).message.required = true];
+}
+
+// CreateResponse ответ на запрос создания корабля
+message CreateResponse {
+  // spaceship данные корабля
+  Spaceship spaceship = 1;
+}
+
+// GetRequest запрос на получение корабля по идентификатору
+message GetRequest {
+  // uuid идентификатор корабля
+  string uuid = 1;
+}
+
+// GetResponse ответ с данными корабля
+message GetResponse {
+  // spaceship данные корабля
+  Spaceship spaceship = 1;
+}
+
+// UpdateRequest запрос на обновление корабля
+message UpdateRequest {
+  // uuid идентификатор корабля для обновления
+  string uuid = 1;
+
+  // Обновляемая информация о корабле (частичное обновление)
+  SpaceshipUpdateInfo update_info = 2 [(validate.rules).message.required = true];
+}
+
+// UpdateResponse ответ с обновленными данными корабля
+message UpdateResponse {
+  // spaceship данные обновленного корабля
+  Spaceship spaceship = 1;
+}
+
+// DeleteRequest запрос на удаление корабля
+message DeleteRequest {
+  // uuid идентификатор корабля для удаления
+  string uuid = 1;
+}
+
+// WatchUpdatesRequest запрос на подписку на обновления кораблей
+message WatchUpdatesRequest {
+  // uuid идентификатор конкретного корабля для отслеживания (опционально)
+  // Если не указан, отслеживаются все корабли
+  google.protobuf.StringValue uuid = 1;
+}
+
+// EventType тип события
+enum EventType {
+  // EVENT_TYPE_UNSPECIFIED неизвестное событие
+  EVENT_TYPE_UNSPECIFIED = 0;
+  // EVENT_TYPE_CREATED корабль создан
+  EVENT_TYPE_CREATED = 1;
+  // EVENT_TYPE_UPDATED корабль обновлен
+  EVENT_TYPE_UPDATED = 2;
+  // EVENT_TYPE_DELETED корабль удален
+  EVENT_TYPE_DELETED = 3;
+}
+
+// WatchUpdatesResponse ответ на запрос на подписку на обновления кораблей
+message WatchUpdatesResponse {
+  // update_event событие обновления корабля
+  UpdateEvent update_event = 1;
+}
+
+// UpdateEvent событие обновления корабля
+message UpdateEvent {
+  // event_type тип события
+  EventType event_type = 1;
+
+  // spaceship данные корабля (может быть null для DELETED)
+  Spaceship spaceship = 2;
+
+  // timestamp время события
+  google.protobuf.Timestamp timestamp = 3;
+}
